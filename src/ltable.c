@@ -36,7 +36,7 @@
 
 
 /*
-** max size of array part is 2^MAXBITS
+** max size of array part is 2^MAXBITS    Table.sizearray / TValue* Table.array 数组部分的大小是2^26
 */
 #if LUAI_BITSINT > 26
 #define MAXBITS		26
@@ -122,12 +122,12 @@ static Node *mainposition (const Table *t, const TValue *key) {
 */
 // 在数组中寻找一个key, 如果找到则返回在数组中的索引, 否则返回-1
 static int arrayindex (const TValue *key) {
-  if (ttisnumber(key)) {
+  if (ttisnumber(key)) { // 判断key是不是一个整数(可否成为数组索引)  比如key是2.1 就不是整数了 
     lua_Number n = nvalue(key);
     int k;
     lua_number2int(k, n);
     if (luai_numeq(cast_num(k), n))
-      return k;
+      return k; // 返回k 代表这个key可以作为数组的索引 是个整数
   }
   return -1;  /* `key' did not match some condition */
 }
@@ -152,12 +152,24 @@ static int findindex (lua_State *L, Table *t, StkId key) {
 	// 否则查找hash部分
     Node *n = mainposition(t, key);
     do {  /* check whether `key' is somewhere in the chain */
-      /* key may be dead already, but it is ok to use it in `next' */
-      if (luaO_rawequalObj(key2tval(n), key) ||
-            (ttype(gkey(n)) == LUA_TDEADKEY && iscollectable(key) &&
+		
+      /* key may be dead already, but it is ok to use it in `next' */ // key可能已经gc掉了
+
+	  // key2tval(n) 获取Node中Key的TValue          // luaO_rawequalObj 对比了key 包括key是GC对象  
+      if (luaO_rawequalObj(key2tval(n), key) || // 针对Key是GC对象,但是已经remove 也就是tt是LUA_TDEADKEY 还是可以对比
+            (ttype(gkey(n)) == LUA_TDEADKEY && iscollectable(key) && // key的tt>LUA_TSTRING 才有可能是可回收的key
              gcvalue(gkey(n)) == gcvalue(key))) {
-    	// 需要算出在hash部分中的偏移位置
+             // Node 包含了Key和Value 
+             // gkey(n) 获取Node中的Key      gcvalue(gkey(n)) Node n的key的Value 中的GCObject 
+             // gcvalue(key)  给定的key中的Value的GCObject*    
+             // 
+
+			 
+    	// 需要算出在hash部分中的偏移位置                 这个table散列部分第一个Node 和 当前Node(散列桶链表中的一个Node)      
+    	// Node*p1 - Node*p2 =  相差Node个数      所有的Node都是在数组中的 
         i = cast_int(n - gnode(t, 0));  /* key index in hash table */
+
+		
         /* hash elements are numbered after array ones */
         // 这个偏移位置还要加上数组部分的长度,以便区分
         return i + t->sizearray;
@@ -172,12 +184,17 @@ static int findindex (lua_State *L, Table *t, StkId key) {
 
 // 根据key寻找下一个不为nil的元素, 找到返回1,
 int luaH_next (lua_State *L, Table *t, StkId key) {
+
+	// key是原来元素的索引 TValue 
   int i = findindex(L, t, key);  /* find original element */
+
+  // i++ 代表下一个 
   for (i++; i < t->sizearray; i++) {  /* try first array part */
     if (!ttisnil(&t->array[i])) {  /* a non-nil value? */
       // i + 1存入key中
-      setnvalue(key, cast_num(i+1));
-      // 将i的值复制到key + 1中(也就是i + 2)
+      setnvalue(key, cast_num(i+1));  // 把索引号 更新到参数key 这样指向了下一个  
+
+		// 将i的值复制到key + 1中(也就是i + 2)
       setobj2s(L, key+1, &t->array[i]);
       return 1;
     }
@@ -186,7 +203,10 @@ int luaH_next (lua_State *L, Table *t, StkId key) {
   // 这里居然使用的i++,不是node中的next,这不对吧????
   // 换言之,这里取到的不是在同一个hash桶上的node
   for (i -= t->sizearray; i < sizenode(t); i++) {  /* then hash part */
-    if (!ttisnil(gval(gnode(t, i)))) {  /* a non-nil value? */
+    if (!ttisnil(gval(gnode(t, i)))) {  /* a non-nil value? */  
+		
+		// 按散列数组的顺序 往下走  也就是遍历的顺序不会是一个hash值遍历完再来一个
+		
       setobj2s(L, key, key2tval(gnode(t, i)));
       setobj2s(L, key+1, gval(gnode(t, i)));
       return 1;
@@ -214,18 +234,22 @@ static int computesizes (int nums[], int *narray) {
   // na满足这个条件:在
   for (i = 0, twotoi = 1; twotoi/2 < *narray; i++, twotoi *= 2) {
     if (nums[i] > 0) {
+		
       // 加上当前数量
       a += nums[i];
       // 如果数量已经超过半数, 那么数组的尺寸可以设置为这个大小
       if (a > twotoi/2) {  /* more than half elements present? */
-        n = twotoi;  /* optimal size (till now) */
+
+		n = twotoi;  /* optimal size (till now) */
+		
         // 记录下当前的数组大小
         na = a;  /* all elements smaller than n will go to array part */
-      }
+	  
+      } // 这里没有跳出来 所以还要可能
     }
     if (a == *narray) break;  /* all elements already counted */
   }
-  *narray = n;
+  *narray = n; // 重新计算后 数组的大小 返回 
   lua_assert(*narray/2 <= na && na <= *narray);
   return na;
 }
@@ -236,7 +260,7 @@ static int countint (const TValue *key, int *nums) {
   int k = arrayindex(key);
   if (0 < k && k <= MAXASIZE) {  /* is `key' an appropriate array index? */
 	// 如果k在一个合理的范围内,将相应的nums加1
-    nums[ceillog2(k)]++;  /* count as such */
+    nums[ceillog2(k)]++;  /* count as such */  // 这个key可以作为数组索引 所以加到如统计中nums
     return 1;
   }
   else
@@ -249,7 +273,7 @@ static int numusearray (const Table *t, int *nums) {
   int ttlg;  /* 2^lg */
   int ause = 0;  /* summation of `nums' */
   int i = 1;  /* count to traverse all array keys */
-  for (lg=0, ttlg=1; lg<=MAXBITS; lg++, ttlg*=2) {  /* for each slice */
+  for (lg=0, ttlg=1; lg<=MAXBITS; lg++, ttlg*=2) {  /* for each slice */  // ttlg = 2^lg 
     int lc = 0;  /* counter */
     int lim = ttlg;
     if (lim > t->sizearray) {
@@ -258,12 +282,14 @@ static int numusearray (const Table *t, int *nums) {
         break;  /* no more elements to count */
     }
     /* count elements in range (2^(lg-1), 2^lg] */
-    for (; i <= lim; i++) {
-      if (!ttisnil(&t->array[i-1]))
+	
+    for (; i <= lim; i++) { // lim 是 2^lg/ttlg 或者是 原来数组的大小
+    
+      if (!ttisnil(&t->array[i-1])) // TValue不是nil 才会计算 
         lc++;
     }
     nums[lg] += lc;
-    ause += lc;
+    ause += lc; // 数组总的长度 减去哪些death的
   }
   return ause;
 }
@@ -273,13 +299,13 @@ static int numusearray (const Table *t, int *nums) {
 static int numusehash (const Table *t, int *nums, int *pnasize) {
   int totaluse = 0;  /* total number of elements */
   int ause = 0;  /* summation of `nums' */
-  int i = sizenode(t);
+  int i = sizenode(t); 
   while (i--) {
-    Node *n = &t->node[i];
-    if (!ttisnil(gval(n))) {
-      ause += countint(key2tval(n), nums);
+    Node *n = &t->node[i]; //   t->node 是包含散列桶头和散列链表所有的Node  散列链表的成员其实也是在散列数组(t->node)中的
+    if (!ttisnil(gval(n))) {   
+      ause += countint(key2tval(n), nums); // key2tval(n) 给定Node的key的TValue  +1 
       totaluse++;
-    }
+    }   
   }
   *pnasize += ause;
   return totaluse;
@@ -375,22 +401,29 @@ void luaH_resizearray (lua_State *L, Table *t, int nasize) {
 
 // 对table进行重新划分hash和数组部分的大小
 static void rehash (lua_State *L, Table *t, const TValue *ek) {
+
   int nasize, na;
+  
   // nums中存放的是key在2^(i-1), 2^i之间的元素数量
   int nums[MAXBITS+1];  /* nums[i] = number of keys between 2^(i-1) and 2^i */
   int i;
   int totaluse;
+  
   // 首先清空nums数组
   for (i=0; i<=MAXBITS; i++) nums[i] = 0;  /* reset counts */
+  
   // 计算数组部分在每个范围中数据的数量,返回的nasize是数组部分数据的数量
   nasize = numusearray(t, nums);  /* count keys in array part */
-  totaluse = nasize;  /* all those keys are integer keys */
+  totaluse = nasize;  /* all those keys are integer keys */ // 数组部分的长度 
+  
   // 计算hash中key的数量
   totaluse += numusehash(t, nums, &nasize);  /* count keys in hash part */
+  
   /* count extra key */
   // 判断新key的范围
-  nasize += countint(ek, nums);
-  totaluse++;
+  nasize += countint(ek, nums); // 新的key 是否可以作为数组索引(正整数) 可以的话+1 
+  totaluse++; // value没有die(不是nil)的元素总数
+  
   /* compute new size for array part */
   // 计算新的数组部分的大小
   na = computesizes(nums, &nasize);
@@ -432,7 +465,7 @@ void luaH_free (lua_State *L, Table *t) {
 // 在hash中寻找一个可用位置
 static Node *getfreepos (Table *t) {
   while (t->lastfree-- > t->node) {
-    if (ttisnil(gkey(t->lastfree)))
+    if (ttisnil(gkey(t->lastfree))) // 找到一个散列桶(桶头)的Key是nil Node.i_key.nk.tt == LUA_TNIL 
       return t->lastfree;
   }
   return NULL;  /* could not find a free place */
@@ -451,6 +484,9 @@ static Node *getfreepos (Table *t) {
 static TValue *newkey (lua_State *L, Table *t, const TValue *key) {
   // 根据key寻找在hash中的位置
   Node *mp = mainposition(t, key);
+
+  // ttisnil  TValue.tt 
+  
   // 如果该位置上已经有数据了(!ttisnil(gval(mp)), 或者找不到位置(mp == dummynode)
   if (!ttisnil(gval(mp)) || mp == dummynode) {
     Node *othern;
@@ -461,21 +497,31 @@ static TValue *newkey (lua_State *L, Table *t, const TValue *key) {
       rehash(L, t, key);  /* grow table */
       return luaH_set(L, t, key);  /* re-insert key into grown table */
     }
+	
     lua_assert(n != dummynode);
-    othern = mainposition(t, key2tval(mp));
+    othern = mainposition(t, key2tval(mp)); // key2tval(mp) mp这个Node的key值(TValue)
+    
     if (othern != mp) {  /* is colliding node out of its main position? */
+
+	  // 桶头这个Node 只是没有位置的时候 通过getfreepos 在散列桶数组 找到一个位置 然后加入到对应hash桶头的链表中
+	  // 
+	  // 现在桶头有真正的主人的(hash)一致,就必须腾出位置了
+	  
       /* yes; move colliding node into free position */
-      while (gnext(othern) != mp) othern = gnext(othern);  /* find previous */
+      while (gnext(othern) != mp) othern = gnext(othern);  /* find previous */  // 找到othern为桶开头的 链表中 mp的前一个Node
+	  
       gnext(othern) = n;  /* redo the chain with `n' in place of `mp' */
       *n = *mp;  /* copy colliding node into free pos. (mp->next also goes) */
+	  
       gnext(mp) = NULL;  /* now `mp' is free */
       setnilvalue(gval(mp));
+	  
     }
-    else {  /* colliding node is in its own main position */
+    else {  /* colliding node is in its own main position */ // 冲突的节点 在 桶头
       /* new node will go into free position */
       gnext(n) = gnext(mp);  /* chain new position */
       gnext(mp) = n;
-      mp = n;
+      mp = n; // 在桶头插入
     }
   }
   gkey(mp)->value = key->value; gkey(mp)->tt = key->tt;

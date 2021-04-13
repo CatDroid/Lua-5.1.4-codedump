@@ -68,11 +68,11 @@ int luaO_log2 (unsigned int x) {
 
 }
 
-
+// 先判断类型 TValue.tt 是否一致   然后再对比 TValue.value.??? ???是union中某个字段
 int luaO_rawequalObj (const TValue *t1, const TValue *t2) {
   if (ttype(t1) != ttype(t2)) return 0;
   else switch (ttype(t1)) {
-    case LUA_TNIL:
+    case LUA_TNIL: // nil == nil 
       return 1;
     case LUA_TNUMBER:
       return luai_numeq(nvalue(t1), nvalue(t2));
@@ -82,7 +82,7 @@ int luaO_rawequalObj (const TValue *t1, const TValue *t2) {
       return pvalue(t1) == pvalue(t2);
     default:
       lua_assert(iscollectable(t1));
-      return gcvalue(t1) == gcvalue(t2);
+      return gcvalue(t1) == gcvalue(t2);// Key是GC对象
   }
 }
 
