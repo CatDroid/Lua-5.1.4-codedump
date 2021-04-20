@@ -48,16 +48,20 @@ void *luaM_growaux_ (lua_State *L, void *block, int *size, size_t size_elems,
   void *newblock;
   int newsize;
   if (*size >= limit/2) {  /* cannot double it? */
-    if (*size >= limit)  /* cannot grow even a little? */
+    if (*size >= limit)  /* cannot grow even a little? */ // 已经超过limit 
       luaG_runerror(L, errormsg);
-    newsize = limit;  /* still have at least one free place */
+    newsize = limit;  /* still have at least one free place */ // 如果两倍后会超过limit,那newsize就只能是limit
   }
   else {
-    newsize = (*size)*2;
+    newsize = (*size)*2; // 两倍增加 但是最小不能少于4个
     if (newsize < MINSIZEARRAY)
       newsize = MINSIZEARRAY;  /* minimum size */
   }
+
+  // 每个元素的大小是size_elemts 原来数目是*size 现在数目是newSize  
+  // realloc原来block指向的内存  
   newblock = luaM_reallocv(L, block, *size, newsize, size_elems);
+  
   *size = newsize;  /* update only when everything else is OK */
   return newblock;
 }

@@ -82,7 +82,7 @@ int luaO_rawequalObj (const TValue *t1, const TValue *t2) {
       return pvalue(t1) == pvalue(t2);
     default:
       lua_assert(iscollectable(t1));
-      return gcvalue(t1) == gcvalue(t2);// Key是GC对象
+      return gcvalue(t1) == gcvalue(t2);// Key是GC对象    直接判断地址是否同一个
   }
 }
 

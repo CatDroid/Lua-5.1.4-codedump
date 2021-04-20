@@ -238,21 +238,21 @@ typedef struct Proto {
   struct Proto **p;  /* functions defined inside the function */
   int *lineinfo;  /* map from opcodes to source lines */
   // 存放局部变量的数组
-  struct LocVar *locvars;  /* information about local variables */
-  TString **upvalues;  /* upvalue names */
-  TString  *source;
-  int sizeupvalues;
+  struct LocVar *locvars;  /* information about local variables */ // 这个函数所有local a,b,c = exp,exp2,epx3的局部变量信息 变量名字
+  TString **upvalues;  /* upvalue names */ // upvalue的名字 
+  TString  *source; // 源码 ??
+  int sizeupvalues; // 也是update的数目?? 
   int sizek;  /* size of `k' */
   int sizecode;
   int sizelineinfo;
   int sizep;  /* size of `p' */
-  int sizelocvars;
+  int sizelocvars; // 局部变量的数目  locvars 已经被分配的大小 不一定全部使用 按照2倍增加 不能超过200
   int linedefined;
   int lastlinedefined;
   GCObject *gclist;
-  lu_byte nups;  /* number of upvalues */
-  lu_byte numparams;
-  lu_byte is_vararg;
+  lu_byte nups;  /* number of upvalues */ // upvalue的数目 ?? 
+  lu_byte numparams; // 参数数目 
+  lu_byte is_vararg; // 是否可变参数
   lu_byte maxstacksize;
 } Proto;
 
@@ -343,7 +343,7 @@ typedef struct Node {
 
 typedef struct Table {
   CommonHeader;
-  lu_byte flags;  /* 1<<p means tagmethod(p) is not present */ 
+  lu_byte flags;  /* 1<<p means tagmethod(p) is not present 8个元方法没有找到 设置为1 */ 
   lu_byte lsizenode;  /* log2 of size of `node' array */
   struct Table *metatable;
   TValue *array;  /* array part */

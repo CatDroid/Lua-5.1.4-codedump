@@ -217,9 +217,9 @@ void luaK_concat (FuncState *fs, int *l1, int l2) {
 void luaK_checkstack (FuncState *fs, int n) {
   int newstack = fs->freereg + n;
   if (newstack > fs->f->maxstacksize) {
-    if (newstack >= MAXSTACK)
+    if (newstack >= MAXSTACK) // 栈深度只有 250 寄存器不能超过这个数字???
       luaX_syntaxerror(fs->ls, "function or expression too complex");
-    fs->f->maxstacksize = cast_byte(newstack);
+    fs->f->maxstacksize = cast_byte(newstack);// 记录最大栈大小 f->maxstacksize(没有分配??)
   }
 }
 
@@ -231,8 +231,8 @@ void luaK_reserveregs (FuncState *fs, int n) {
 
 // 释放栈上的寄存器空间
 static void freereg (FuncState *fs, int reg) {
-  if (!ISK(reg) && reg >= fs->nactvar) {
-    fs->freereg--;
+  if (!ISK(reg) && reg >= fs->nactvar) {// 不是常量 并且 寄存器索引 超过 有效局部变量数目
+    fs->freereg--; // 寄存器使用数目减少 
     lua_assert(reg == fs->freereg);
   }
 }
@@ -244,32 +244,50 @@ static void freeexp (FuncState *fs, expdesc *e) {
     freereg(fs, e->u.s.info);
 }
 
-// 向函数寄存器添加常量
+// 向函数寄存器添加常量(插入)            只有add的是nil才会一样 一般 k和v是一样的
+// 返回的就是 在fs.f.k中的索引
 static int addk (FuncState *fs, TValue *k, TValue *v) {
+
   lua_State *L = fs->L;
+
+	// fs->h 目的是 通过另外一个table来判断是否有proto.k已经有同样的
+  
   // 得到key的index
-  TValue *idx = luaH_set(L, fs->h, k);
+  TValue *idx = luaH_set(L, fs->h, k); 
+  // 在fs->h 是个table 增加一个key 返回Node中Value 
+  // fs->h 常量作为key  value是常量数组proto->k的索引 
+  
   Proto *f = fs->f;
+  
   int oldsize = f->sizek;
-  if (ttisnumber(idx)) {
+  
+  if (ttisnumber(idx)) { 
+  	
 	// 如果index是数字,那么说明这个k原来在寄存器中已经存在,将值v存放在index所在的寄存器位置
-    lua_assert(luaO_rawequalObj(&fs->f->k[cast_int(nvalue(idx))], v));
+    lua_assert(luaO_rawequalObj(&fs->f->k[cast_int(nvalue(idx))], v)); // 只是一个调试判断 确保一样 
+	
     // 返回index
-    return cast_int(nvalue(idx));
+    return cast_int(nvalue(idx)); 
   }
   else {  /* constant not found; create a new entry */
+  	
 	  // 否则当前nk值设置到idx上
-    setnvalue(idx, cast_num(fs->nk));
+    setnvalue(idx, cast_num(fs->nk)); // 设置 fs-h table中 元素的值为 proto-h的索引
+	  
     // 增加k的数组大小
     luaM_growvector(L, f->k, fs->nk, f->sizek, TValue,
                     MAXARG_Bx, "constant table overflow");
+  
     // 将多出来那部分置空
     while (oldsize < f->sizek) setnilvalue(&f->k[oldsize++]);
+	
     // 现在可以保存v值了
     setobj(L, &f->k[fs->nk], v);
+	
     luaC_barrier(L, f, v);
+	
     // 返回寄存器索引
-    return fs->nk++;
+    return fs->nk++; // 更新 常量数组proto.k的大小  返回常量 在f->k中的索引  
   }
 }
 
@@ -280,11 +298,13 @@ int luaK_stringK (FuncState *fs, TString *s) {
   return addk(fs, &o, &o);
 }
 
-// 向FuncState添加一个数字常量
+// 向FuncState添加一个数字常量 (实际是fs.f proto中的k数组添加了一个元素)
 int luaK_numberK (FuncState *fs, lua_Number r) {
+
   TValue o;
-  setnvalue(&o, r); 
- return addk(fs, &o, &o);
+  setnvalue(&o, r);  // 生成一个TValue 存放的是number数字
+  
+ return addk(fs, &o, &o); // key和value都一样   addk 返回的是常量在fs-f.k数组中的索引
 }
 
 // 添加一个BOOL类型常量
@@ -327,8 +347,24 @@ void luaK_setoneret (FuncState *fs, expdesc *e) {
   }
 }
 
-// 这里的重点是设置e->k,即是否需要重定向
 // 为什么在luaK_exp2nextreg函数和discharge2reg函数中分别被调用两次
+//
+//luaK_exp2nextreg
+//
+//   luaK_dischargevars   e.k = VGLOBAL-> VRELOCABLE   e.u.s.info 常量数组索引 -> luaK_codeABx(OP_GETGLOBAL e.u.s.info )
+//
+//   freeexp
+//
+//   luaK_reserveregs  
+//   
+//   exp2reg 
+//	
+//		discharge2reg  
+//
+//					luaK_dischargevars    VRELOCABLE  e.u.s.info 是指令 更新参数A         GETGLOBAL  R[A] = Gbl[Kst[Bx]]  先根据Bx在当前函数的常量数组 找到 字符串/全局变量的名字 然后作为索引 在 Gbl全局数组中 找到全局变量(运行时候) 
+//					luaK_code
+
+// 这里的重点是设置e->k,即是否需要重定向
 void luaK_dischargevars (FuncState *fs, expdesc *e) {
   switch (e->k) {
     case VLOCAL: {
@@ -372,7 +408,9 @@ static int code_label (FuncState *fs, int A, int b, int jump) {
 
 // 根据表达式的e->k载入寄存器
 static void discharge2reg (FuncState *fs, expdesc *e, int reg) {
+
   luaK_dischargevars(fs, e);
+  
   switch (e->k) {
     case VNIL: {
       luaK_nil(fs, reg, 1);
@@ -386,14 +424,20 @@ static void discharge2reg (FuncState *fs, expdesc *e, int reg) {
       luaK_codeABx(fs, OP_LOADK, reg, e->u.s.info);
       break;
     }
-    case VKNUM: {
+    case VKNUM: { // 如果是VKNUM是load  如果是变量local a=b 是Move 
       luaK_codeABx(fs, OP_LOADK, reg, luaK_numberK(fs, e->u.nval));
+	  // luaK_codeABx 是生成一个指令  操作码是OP_LOADK: 加载数据到指定寄存器 
+	  // 从常量数组中 索引是luaK_numberK的返回值               加载到 reg指定的寄存器 
+
+	  // 这个代码的意思是:
+	  // fs.f.k 插入一个常量 返回这个产量在k数组的索引
+	  // fs.f.code  f->code[fs->pc] 插入一个指令 并且fs.pc加一
       break;
     }
     case VRELOCABLE: {
       // 重定位, 因为赋值的时候不知道当前可用的寄存器指针,所以这里要重新定位下
-      Instruction *pc = &getcode(fs, e);
-      SETARG_A(*pc, reg);
+      Instruction *pc = &getcode(fs, e); // e.info 存放着PC  fs)->f->code 可以获取指令 
+      SETARG_A(*pc, reg); // 设置指令使用 寄存器序号reg 作为 参数A
       break;
     }
     case VNONRELOC: {
@@ -422,8 +466,15 @@ static void discharge2anyreg (FuncState *fs, expdesc *e) {
 
 // 将表达式e放入reg寄存器中
 static void exp2reg (FuncState *fs, expdesc *e, int reg) {
-  // 表达式e的结果存入寄存器reg中
-  discharge2reg(fs, e, reg);
+
+  // reg 是 fs->freereg 预先分配好的(luaK_reserveregs) 函数栈 索引 
+
+  // 生成opcode   实现在运行的时候 将表达式e的结果(比如常量) 存入 寄存器reg中
+  discharge2reg(fs, e, reg); 
+
+  // 比如是 local a = 2 就会把2先放到数组proto.k[index]=2中, 
+  // 然后把index返回, 并(作为操作数)记录到指令中, 指令同时记录了 函数栈的索引reg
+  
   if (e->k == VJMP)
     luaK_concat(fs, &e->t, e->u.s.info);  /* put this jump in `t' list */
   if (hasjumps(e)) {
@@ -453,13 +504,19 @@ static void exp2reg (FuncState *fs, expdesc *e, int reg) {
 
 // 讲表达式dump到当前栈的下一个位置中
 void luaK_exp2nextreg (FuncState *fs, expdesc *e) {
+
   // 首先如果是一个变量的话 现在根据变量类型(upval, GLOBAL, LOCAL)dump出来
-  luaK_dischargevars(fs, e);
-  freeexp(fs, e);
-  // 将freereg+1, 也就是参数数量加1
-  luaK_reserveregs(fs, 1);
+  // 把 expdesc->k expkind 表达式类型 重新标记成 两类 VNONRELOC VRELOCABLE 需要重定向和不需要重定向
+  // 还有一些是 VK_NUM 直接返回 
+  luaK_dischargevars(fs, e); // 跟 discharge2reg 不一样  
+
+  freeexp(fs, e); // 如果是全局变量 local a = globl_var ; 这时候 e.u.s.info存放的是 常量数组中的索引(全局变量的名字)
+  
+  // 将freereg+1, 也就是参数数量加1             函数栈预留增加1 ??         fs->freereg 增加1 
+  luaK_reserveregs(fs, 1);  // 这个会导致 fs.freereg加了1 
+  
   // 将表达式dump到这个新分配的栈空间中
-  exp2reg(fs, e, fs->freereg - 1);
+  exp2reg(fs, e, fs->freereg - 1);  // fs->freereg - 1 是函数栈的索引(也就是局部变量的位置)
 }
 
 // 返回值是寄存器索引(与luaK_exp2nextreg的区别和联系是？？？？？？)
@@ -488,9 +545,10 @@ void luaK_exp2val (FuncState *fs, expdesc *e) {
     luaK_dischargevars(fs, e);
 }
 
-
 int luaK_exp2RK (FuncState *fs, expdesc *e) {
+
   luaK_exp2val(fs, e);
+  
   switch (e->k) {
     case VKNUM:
     case VTRUE:
@@ -499,18 +557,18 @@ int luaK_exp2RK (FuncState *fs, expdesc *e) {
       // 如果常量数组还有容量，就放入常量数组中                 
       if (fs->nk <= MAXINDEXRK) {  /* constant fit in RK operand? */
         e->u.s.info = (e->k == VNIL)  ? nilK(fs) :
-                      (e->k == VKNUM) ? luaK_numberK(fs, e->u.nval) :
+                      (e->k == VKNUM) ? luaK_numberK(fs, e->u.nval) : // 如果是个数字 就在常量数组中增加数字 返回一个常量数组的索引
                                         boolK(fs, (e->k == VTRUE));
         e->k = VK;
-        return RKASK(e->u.s.info);
+        return RKASK(e->u.s.info); // 参数B/C设置为常量标记 
       }
       else break;
     }
     case VK: {
       // 如果常量数组还有容量，就放入常量数组中                 
       if (e->u.s.info <= MAXINDEXRK)  /* constant fit in argC? */
-        return RKASK(e->u.s.info);
-      else break;
+        return RKASK(e->u.s.info);// 参数B/C设置为常量标记 
+      else break; 
     }
     default: break;
   }
@@ -858,17 +916,24 @@ void luaK_fixline (FuncState *fs, int line) {
 // 将虚拟机机器指令压入Proto的code中,更新代码行在f的lineinfo数组中,同时更新pc指针
 // 这个函数的返回值是存放这段代码地址的pc指针
 static int luaK_code (FuncState *fs, Instruction i, int line) {
+
   Proto *f = fs->f;
+  
   dischargejpc(fs);  /* `pc' will change */
+  
   /* put new instruction in code array */
   luaM_growvector(fs->L, f->code, fs->pc, f->sizecode, Instruction,
                   MAX_INT, "code size overflow");
-  f->code[fs->pc] = i;
+  
+  f->code[fs->pc] = i;  // proto.code 记录所有指令  fs->pc 记录解析过程中的状态,执行的时候不需要的信息记录在FuncState
+  
   /* save corresponding line information */
   luaM_growvector(fs->L, f->lineinfo, fs->pc, f->sizelineinfo, int,
                   MAX_INT, "code size overflow");
-  f->lineinfo[fs->pc] = line;
-  return fs->pc++;
+  
+  f->lineinfo[fs->pc] = line;  // 记录每条指令 对应的源文件文字
+  
+  return fs->pc++; // fs->pc 指令数组的索引  line 源文件的行号
 }
 
 
@@ -883,7 +948,7 @@ int luaK_codeABC (FuncState *fs, OpCode o, int a, int b, int c) {
 int luaK_codeABx (FuncState *fs, OpCode o, int a, unsigned int bc) {
   lua_assert(getOpMode(o) == iABx || getOpMode(o) == iAsBx);
   lua_assert(getCMode(o) == OpArgN);
-  return luaK_code(fs, CREATE_ABx(o, a, bc), fs->ls->lastline);
+  return luaK_code(fs, CREATE_ABx(o, a, bc), fs->ls->lastline); // lastline 最新的处理行号
 }
 
 

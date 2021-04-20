@@ -105,18 +105,45 @@ static void callTM (lua_State *L, const TValue *f, const TValue *p1,
 }
 
 // 在一个table中查找key对应的值, 找到存放到val中
-void luaV_gettable (lua_State *L, const TValue *t, TValue *key, StkId val) {
+void luaV_gettable (lua_State *L, const TValue *t, TValue *key, StkId val) { // val 是返回
+
   int loop;
-  // 函数外层以MAXTAGLOOP做为计数,防止死循环
-  for (loop = 0; loop < MAXTAGLOOP; loop++) {
+  
+  // 函数外层以MAXTAGLOOP做为计数,防止死循环                    ??? 最大的metatable 为 100个??
+  for (loop = 0; loop < MAXTAGLOOP; loop++) 
+  {
+  
     const TValue *tm;
+	
     if (ttistable(t)) {  /* `t' is a table? */
-      Table *h = hvalue(t);
+		
+      Table *h = hvalue(t); // 从TValue提取Table 
+	  
       // 首先尝试在表中查找这个key
-      const TValue *res = luaH_get(h, key); /* do a primitive get */      
+      const TValue *res = luaH_get(h, key); /* do a primitive get */    
+	
       if (!ttisnil(res) ||  /* result is no nil? */ // 如果结果不是nil
           (tm = fasttm(L, h->metatable, TM_INDEX)) == NULL) { /* or no TM? */ // 在结果为nil的时候如果metable为nil
-        setobj2s(L, val, res);
+
+		/*
+		h->metatable.flags 对应 TM_INDEX 标记为是否为1 为1的话代表上次找过 没有metatable没有index方法
+
+		local base = {}
+		local tbl = setmetatable({} ,base )
+		
+		
+		print(tbl.a) -- nil 
+		
+		base.__index = { a = 1 }
+		
+		print(tbl.a)  -- 1 这里还是会查原表的__index  
+
+		因为 base.__index 会导致 luaH_set (lua_State *L, Table *t, const TValue *key) 这里会把flag清除=0
+
+		*/
+	
+		setobj2s(L, val, res);
+		
         return;
       }
       /* else will try the tag method */
@@ -124,13 +151,16 @@ void luaV_gettable (lua_State *L, const TValue *t, TValue *key, StkId val) {
     // 来查这个表的meta表, 如果不存在则报错
     else if (ttisnil(tm = luaT_gettmbyobj(L, t, TM_INDEX)))
       luaG_typeerror(L, t, "index");
+	
     // 如果是一个函数则直接调用这个函数
     if (ttisfunction(tm)) {
       callTMres(L, val, tm, t, key);
       return;
     }
-    // 否则继续找
+	
+    // 否则继续找 如果 metable 是个 table 那么继续搜索这个table中的key
     t = tm;  /* else repeat with `tm' */
+	
   }
   luaG_runerror(L, "loop in gettable");
 }

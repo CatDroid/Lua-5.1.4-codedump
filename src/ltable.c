@@ -190,11 +190,14 @@ int luaH_next (lua_State *L, Table *t, StkId key) {
 
   // i++ 代表下一个 
   for (i++; i < t->sizearray; i++) {  /* try first array part */
-    if (!ttisnil(&t->array[i])) {  /* a non-nil value? */
+  	
+    if (!ttisnil(&t->array[i])) {  /* a non-nil value? */  // ??? 会出现断开 ???  1 2 3 5 ??? 
       // i + 1存入key中
       setnvalue(key, cast_num(i+1));  // 把索引号 更新到参数key 这样指向了下一个  
+      
+      // 把key的TValue的tt设置为 LUA_TNUMBER 并设置其为整数值 i+1 
 
-		// 将i的值复制到key + 1中(也就是i + 2)
+	  // 将i的值复制到key + 1中(也就是i + 2)
       setobj2s(L, key+1, &t->array[i]);
       return 1;
     }
@@ -573,7 +576,7 @@ const TValue *luaH_getstr (Table *t, TString *key) {
 ** main search function
 */
 // 表查找的主函数,根据key类型进行区分
-const TValue *luaH_get (Table *t, const TValue *key) {
+const TValue *luaH_get (Table *t, const TValue *key) { // table插入一个给定key的node 返回对应的Value
   switch (ttype(key)) {
     case LUA_TNIL: return luaO_nilobject;
     case LUA_TSTRING: return luaH_getstr(t, rawtsvalue(key));
@@ -581,7 +584,8 @@ const TValue *luaH_get (Table *t, const TValue *key) {
       int k;
       lua_Number n = nvalue(key);
       lua_number2int(k, n);
-      if (luai_numeq(cast_num(k), nvalue(key))) /* index is int? */
+	  // 如果是这个正整数 就会走 luaH_getnum 现在数组部分找，然后在散列桶部分找
+	  if (luai_numeq(cast_num(k), nvalue(key))) /* index is int? */
         return luaH_getnum(t, k);  /* use specialized version */
       /* else go through */
       // 注意前面的不成功,再走近下面的hash部分
@@ -598,7 +602,7 @@ const TValue *luaH_get (Table *t, const TValue *key) {
   }
 }
 
-// 除了数字之外的key的set操作
+// 除了数字之外的key的set操作 往table插入一个key 如果key已经存在 就直接返回 否则生成一个 返回的是Node中的Value部分
 TValue *luaH_set (lua_State *L, Table *t, const TValue *key) {
   const TValue *p = luaH_get(t, key);
   t->flags = 0;

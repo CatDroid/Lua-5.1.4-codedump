@@ -84,7 +84,9 @@ static void f_luaopen (lua_State *L, void *ud) {
   // 初始化寄存器
   sethvalue(L, registry(L), luaH_new(L, 0, 2));  /* registry */
   luaS_resize(L, MINSTRTABSIZE);  /* initial size of string table */
-  luaT_init(L);
+  
+  luaT_init(L); // table的初始化 
+  
   luaX_init(L);
   // 初始化not enough memory这个字符串并且标记为不可回收
   luaS_fix(luaS_newliteral(L, MEMERRMSG));
