@@ -50,8 +50,10 @@ void luaT_init (lua_State *L) {
 */
 const TValue *luaT_gettm (Table *events, TMS event, TString *ename) {
   const TValue *tm = luaH_getstr(events, ename);
-  // 这里这个条件是什么原因??
+  
+  // 这里这个条件是什么原因?? => 应该是只运行 TM_EQ 及小于 这个的 event 才能使用 快速查找  因为flag只有8bit
   lua_assert(event <= TM_EQ);
+  
   if (ttisnil(tm)) {  /* no tag method? */
 	// 如果没有这个meta method，那么标记上，避免下一次再次进入这个函数
     events->flags |= cast_byte(1u<<event);  /* cache this fact */
@@ -60,7 +62,7 @@ const TValue *luaT_gettm (Table *events, TMS event, TString *ename) {
   else return tm;
 }
 
-
+// 只有table和userdata有metatable  然后再看metatable是否有event 比如 __INDEX 
 const TValue *luaT_gettmbyobj (lua_State *L, const TValue *o, TMS event) {
   Table *mt;
   switch (ttype(o)) {
@@ -72,7 +74,8 @@ const TValue *luaT_gettmbyobj (lua_State *L, const TValue *o, TMS event) {
       break;
     default:
       mt = G(L)->mt[ttype(o)];
-  }
+  } 
+  // luaH_getstr 在table里面 找指定key为字符串的value   G(L)->tmname[event]是全局字符串表中的
   return (mt ? luaH_getstr(mt, G(L)->tmname[event]) : luaO_nilobject);
 }
 
